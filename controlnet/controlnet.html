@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<!-- Favicon -->
+<link rel="icon" href="faviconVN.ico" type="image/x-icon">
+
+<head>
+    <h1>Let AI take your logo for a spin</h1>
+    <link rel="stylesheet" href="styles.css">
+    <link href='https://fonts.googleapis.com/css?family=Lato:400,700' rel='stylesheet' type='text/css'>
+</head>
+
+<body>
+    <input type="submit" style="margin:5px;" value="Home" class="buttons" onclick="location.href = 'index.html';">
+    </br>
+    </br>
+    <h3>Upload your logo!</h3>
+    <input type="file" class="buttons" accept="image/x-image" id="file-chooser" />
+    </br>
+    </br>
+    Your email: <input type="text" id="email">
+    </br>
+    </br>
+    <button id="upload-button" class="buttons">Upload</button>
+    </br>
+    </br>
+    <span id="results"></span>
+    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.6.0/jquery.min.js"></script>
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.283.1.min.js"></script>
+    <script src="controlnet.js"></script>
+    <p id="footnote1">By clicking <b>Upload</b> you send your image to Amazon S3. </br>
+        You will receive two emails, the first to confirm the upload was successful, </br>
+        and the second when the AI magic is done, with a link to your personalized logos. </br>
+    </p>
+</body>
+
+</html>
