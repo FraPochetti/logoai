@@ -1,2 +1,2 @@
-# logoai
-Customlize your logos with ControlNet on AWS
+# LogoAI
+Customize your logos with ControlNet on AWS
