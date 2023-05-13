@@ -81,7 +81,7 @@ def send_email_to_user(recipient):
 def lambda_handler(event, context):
     
     now = datetime.datetime.now()
-    now_path = f"{now.year}/{now.month}/{now.day}/{now.hour}/{now.minute}"
+    now_path = f"{now.year}/{now.month}/{now.day}/{now.hour}/{now.minute}/{now.second}"
 
     record = event['Records'][0]
     upload_bucket = record['s3']['bucket']['name']
@@ -94,17 +94,19 @@ def lambda_handler(event, context):
     print(f"Email: {recipient}")
     
     data = {"img_id": s3_upload_location}
-    data_stream = io.BytesIO()
-    S3.download_fileobj(upload_bucket, upload_key, data_stream)
-    img_data = base64.b64encode(data_stream.getvalue())
+    #data_stream = io.BytesIO()
+    #S3.download_fileobj(upload_bucket, upload_key, data_stream)
+    #img_data = base64.b64encode(data_stream.getvalue())
 
     sm_input_bucket = "visualneurons.com-logos-outputs"
     sm_input_key = upload_key.split("/")
     sm_input_key = f"{sm_input_key[0]}/{now_path}/input/{sm_input_key[1].split('.')[0]}.json"
-
-    data["img_data"] = img_data.decode("utf-8")
+    
     data["email"] = recipient
-    data["s3_location"] = f"{sm_input_key[0]}/{now_path}/output/"
+    data["s3_location"] = f"{'/'.join(sm_input_key.split('/')[:-2])}/output"
+    print(f"S3 images output location {data['s3_location']}")
+    print(f"JSON sent to SageMaker: {data}")
+    #data["img_data"] = img_data.decode("utf-8")
     
     S3.put_object(
         Body=json.dumps(data),

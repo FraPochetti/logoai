@@ -7,16 +7,17 @@ import cv2
 import einops
 import numpy as np
 import torch
-import random, logging, json, base64, boto3, uuid, zipfile
+import random, logging, json, base64, boto3, uuid, zipfile, urllib
 from botocore.exceptions import ClientError
 from io import BytesIO
+from PIL import Image, ImageOps
 import gc
 from flask import Flask
 from flask import Response
 from flask import request
 
 from pytorch_lightning import seed_everything
-from annotator.util import resize_image, HWC3
+from annotator.util import HWC3
 from annotator.canny import CannyDetector
 from cldm.model import create_model, load_state_dict
 from cldm.ddim_hacked import DDIMSampler
@@ -37,33 +38,31 @@ class Predictor:
         logging.info("DDIM sampler loaded")
         with open('prompts.txt', 'r') as f:
             prompts = f.readlines()
-            self.prompts = [p.strip() for p in prompts]
+            self.prompts = [p.strip() for p in prompts] * 2
         #self.prompts = self.prompts[:3]
         logging.info(f"Running with {len(self.prompts)} prompts")
 
 
     def gen(self,
-            input_image,
+            img,
             a_prompt='',
             n_prompt='',
             num_samples=1,
-            image_resolution=512,
             ddim_steps=20,
             guess_mode=False,
             strength=1.0,
             low_threshold=100,
             high_threshold=200,
             scale=9.0,
-            seed=42,
+            seed=-1,
             eta=0.0):
         for prompt in self.prompts:
             logging.info(f"Processing prompt: {prompt}")
-            yield self.process(input_image=input_image,
+            yield self.process(img=img,
                                prompt=prompt,
                                a_prompt=a_prompt,
                                n_prompt=n_prompt,
                                num_samples=num_samples,
-                               image_resolution=image_resolution,
                                ddim_steps=ddim_steps,
                                guess_mode=guess_mode,
                                strength=strength,
@@ -76,12 +75,11 @@ class Predictor:
 
 
     def process(self,
-                input_image: np.ndarray,
+                img: np.ndarray,
                 prompt: str,
                 a_prompt='',
                 n_prompt='',
                 num_samples=1,
-                image_resolution=512,
                 ddim_steps=20,
                 guess_mode=False,
                 strength=1.0,
@@ -90,14 +88,14 @@ class Predictor:
                 scale=9.0,
                 seed=42,
                 eta=0.0):
+        logging.info(f"Processing with seed: {seed}")
+        config.save_memory = True
         with torch.no_grad():
-            img = resize_image(HWC3(input_image), image_resolution)
-            logging.info(f"Image resized to {img.shape}")
             H, W, _ = img.shape
 
             detected_map = self.apply_canny(img, low_threshold, high_threshold)
             detected_map = HWC3(detected_map)
-            logging.info("Edges detected with Canny")
+            logging.info(f"Edges detected with Canny on img size {H}x{W}")
 
             control = torch.from_numpy(detected_map.copy()).float().cuda() / 255.0
             control = torch.stack([control for _ in range(num_samples)], dim=0)
@@ -132,20 +130,72 @@ class Predictor:
             results = [x_samples[i] for i in range(num_samples)]
         
         del samples, x_samples, control, cond, un_cond, detected_map
+        torch.cuda.empty_cache()
         return results
+
+
+def resize_image(input_image, resolution):
+    H, W, C = input_image.shape
+    H = float(H)
+    W = float(W)
+    max_HW = max(H, W)
+    if max_HW <= resolution:
+        return input_image 
+    k = float(resolution) / max(H, W)
+    H *= k
+    W *= k
+    H = int(np.round(H / 64.0)) * 64
+    W = int(np.round(W / 64.0)) * 64
+    img = cv2.resize(input_image, (W, H), interpolation=cv2.INTER_LANCZOS4 if k > 1 else cv2.INTER_AREA)
+    return img
+
+
+def rgba2rgb(rgba, background=(255,255,255)):
+    row, col, ch = rgba.shape
+
+    if ch == 3:
+        return rgba
+
+    assert ch == 4, 'RGBA image has 4 channels.'
+
+    rgb = np.zeros( (row, col, 3), dtype='float32' )
+    r, g, b, a = rgba[:,:,0], rgba[:,:,1], rgba[:,:,2], rgba[:,:,3]
+
+    a = np.asarray( a, dtype='float32' ) / 255.0
+
+    R, G, B = background
+
+    rgb[:,:,0] = r * a + (1.0 - a) * R
+    rgb[:,:,1] = g * a + (1.0 - a) * G
+    rgb[:,:,2] = b * a + (1.0 - a) * B
+
+    return np.asarray(rgb, dtype='uint8')
 
 
 def parse_request(req: request):
     content = req.get_json()
-    img = base64.b64decode(content['img_data'])
-    img = np.frombuffer(img, np.uint8)
-    img = cv2.imdecode(img, cv2.IMREAD_COLOR)
+    img_id = content['img_id']
+
+    parsed_url = urllib.parse.urlparse(img_id)
+    bucket = parsed_url.netloc
+    key = parsed_url.path[1:]
+
+    obj = S3.get_object(Bucket=bucket, Key=key)
+    img = Image.open(BytesIO(obj['Body'].read())).convert('RGBA')
+    img = ImageOps.exif_transpose(img)
+    img = np.array(img)
+    logging.info(f"Image loaded from {img_id} with size {img.shape}")
+
+    img = rgba2rgb(img)
+    img = resize_image(HWC3(img), 768)
 
     email = content['email']
     s3_location = content['s3_location']
     logging.info(f"Processing image of size {img.shape} for {email} and save results to {s3_location}")
-    return img, email, s3_location
 
+    logging.info(f"Image resized to {img.shape}")
+    return img, email, s3_location
+    
 
 def upload_to_s3(img, s3_location):
     sm_key = f"{s3_location}/{uuid.uuid4().hex}.jpeg"
@@ -258,22 +308,22 @@ BODY_TEXT = ("VisualNeurons.com - your personalised logos are ready! \r\n"
 def predict():
     input_image, recipient, s3_location = parse_request(request)
     logging.info("Image loaded. Processing...")
-    out_gen = PREDICTOR.gen(input_image=input_image)
+    out_gen = PREDICTOR.gen(img=input_image)
 
-    images = []
     for res in out_gen:
         for img in res:
-            images.append(upload_to_s3(img, s3_location))
-    
-    torch.cuda.empty_cache()
-    gc.collect()
+            upload_to_s3(img, s3_location)
 
     zip_file_name = zip_images(s3_location)
     logging.info(f"Zipped images to {zip_file_name}")
     
     send_email_to_user(recipient, zip_file_name)
 
-    return Response(response=json.dumps(images), status=200)
+    del out_gen, res, img, input_image
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    return Response(response="Done", status=200)
 
 
 @app.route("/ping")
