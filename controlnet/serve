@@ -38,16 +38,16 @@ class Predictor:
         logging.info("DDIM sampler loaded")
         with open('prompts.txt', 'r') as f:
             prompts = f.readlines()
-            self.prompts = [p.strip() for p in prompts] * 2
-        #self.prompts = self.prompts[:3]
+            self.prompts = [p.strip() for p in prompts]
+        #self.prompts = random.sample(self.prompts, 3)
         logging.info(f"Running with {len(self.prompts)} prompts")
 
 
     def gen(self,
             img,
+            num_samples,
             a_prompt='',
             n_prompt='',
-            num_samples=1,
             ddim_steps=20,
             guess_mode=False,
             strength=1.0,
@@ -56,8 +56,8 @@ class Predictor:
             scale=9.0,
             seed=-1,
             eta=0.0):
-        for prompt in self.prompts:
-            logging.info(f"Processing prompt: {prompt}")
+        for i, prompt in enumerate(self.prompts):
+            logging.info(f"Processing prompt N {i}: {prompt}")
             yield self.process(img=img,
                                prompt=prompt,
                                a_prompt=a_prompt,
@@ -138,38 +138,14 @@ def resize_image(input_image, resolution):
     H, W, C = input_image.shape
     H = float(H)
     W = float(W)
-    max_HW = max(H, W)
-    if max_HW <= resolution:
-        return input_image 
-    k = float(resolution) / max(H, W)
+    max_HW = max(H, W) 
+    k = float(resolution) / max_HW
     H *= k
     W *= k
     H = int(np.round(H / 64.0)) * 64
     W = int(np.round(W / 64.0)) * 64
     img = cv2.resize(input_image, (W, H), interpolation=cv2.INTER_LANCZOS4 if k > 1 else cv2.INTER_AREA)
     return img
-
-
-def rgba2rgb(rgba, background=(255,255,255)):
-    row, col, ch = rgba.shape
-
-    if ch == 3:
-        return rgba
-
-    assert ch == 4, 'RGBA image has 4 channels.'
-
-    rgb = np.zeros( (row, col, 3), dtype='float32' )
-    r, g, b, a = rgba[:,:,0], rgba[:,:,1], rgba[:,:,2], rgba[:,:,3]
-
-    a = np.asarray( a, dtype='float32' ) / 255.0
-
-    R, G, B = background
-
-    rgb[:,:,0] = r * a + (1.0 - a) * R
-    rgb[:,:,1] = g * a + (1.0 - a) * G
-    rgb[:,:,2] = b * a + (1.0 - a) * B
-
-    return np.asarray(rgb, dtype='uint8')
 
 
 def parse_request(req: request):
@@ -181,12 +157,11 @@ def parse_request(req: request):
     key = parsed_url.path[1:]
 
     obj = S3.get_object(Bucket=bucket, Key=key)
-    img = Image.open(BytesIO(obj['Body'].read())).convert('RGBA')
+    img = Image.open(BytesIO(obj['Body'].read())).convert('RGB')
     img = ImageOps.exif_transpose(img)
     img = np.array(img)
     logging.info(f"Image loaded from {img_id} with size {img.shape}")
 
-    img = rgba2rgb(img)
     img = resize_image(HWC3(img), 768)
 
     email = content['email']
@@ -308,7 +283,7 @@ BODY_TEXT = ("VisualNeurons.com - your personalised logos are ready! \r\n"
 def predict():
     input_image, recipient, s3_location = parse_request(request)
     logging.info("Image loaded. Processing...")
-    out_gen = PREDICTOR.gen(img=input_image)
+    out_gen = PREDICTOR.gen(img=input_image, num_samples=1)
 
     for res in out_gen:
         for img in res:
