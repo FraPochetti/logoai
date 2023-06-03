@@ -94,9 +94,6 @@ def lambda_handler(event, context):
     print(f"Email: {recipient}")
     
     data = {"img_id": s3_upload_location}
-    #data_stream = io.BytesIO()
-    #S3.download_fileobj(upload_bucket, upload_key, data_stream)
-    #img_data = base64.b64encode(data_stream.getvalue())
 
     sm_input_bucket = "visualneurons.com-logos-outputs"
     sm_input_key = upload_key.split("/")
@@ -106,7 +103,6 @@ def lambda_handler(event, context):
     data["s3_location"] = f"{'/'.join(sm_input_key.split('/')[:-2])}/output"
     print(f"S3 images output location {data['s3_location']}")
     print(f"JSON sent to SageMaker: {data}")
-    #data["img_data"] = img_data.decode("utf-8")
     
     S3.put_object(
         Body=json.dumps(data),
@@ -118,7 +114,9 @@ def lambda_handler(event, context):
     s3_input_location = f"s3://{sm_input_bucket}/{sm_input_key}"
     print(f"SageMaker input location {s3_input_location}")
     
-    response = sm_runtime.invoke_endpoint_async(EndpointName=ENDPOINT_NAME, InputLocation=s3_input_location)
+    response = sm_runtime.invoke_endpoint_async(EndpointName=ENDPOINT_NAME, 
+                                                InputLocation=s3_input_location,
+                                                InvocationTimeoutSeconds=3600)
     s3_output_location = response["OutputLocation"]
     print(f"SageMaker output location {s3_output_location}")
 

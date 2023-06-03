@@ -52,7 +52,8 @@ button.addEventListener('click', function() {
 
         bucket.putObject(params, function(err, data) {
             if (err) {
-                results.textContent = 'ERROR: ' + err;
+                results.textContent = 'Sorry, we have disabled this service!';
+                //results.textContent = 'ERROR: ' + err;
             } else {
                 results.textContent = "Logo uploaded successfully!";
             }

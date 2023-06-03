@@ -1,2 +1,2 @@
 # LogoAI
-Customize your logos with ControlNet on AWS
+[Customize](https://visualneurons.com/controlnet.html) your logos with ControlNet on AWS
